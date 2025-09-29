@@ -1,155 +1,119 @@
+<!-- +page.svelte -->
 <script>
-	import { onMount, onDestroy } from 'svelte';
-	import { browser } from '$app/environment';
+  import { onMount, onDestroy } from 'svelte';
+  import { browser } from '$app/environment';
 
-	let number = '-';
-	let lastShake = 0;
-	let errorMessage = '';
-	const SHAKE_THRESHOLD = 15; // Acceleration threshold for shake detection
-	const SHAKE_COOLDOWN = 1000; // Minimum time between shakes in ms
+  let value = 1, listening = false, lastRoll = 0;
+  let trackX = true, trackY = true;
 
-	function roll() {
-		number = Math.floor(Math.random() * 6) + 1;
-	}
+  let ax=0, ay=0, az=0, gx=0, gy=0, gz=0, alpha=0, beta=0, gamma=0;
 
-	function handleMotion(event) {
-		if (!event.accelerationIncludingGravity) {
-			errorMessage = 'No acceleration data available';
-			return;
-		}
+  const THRESHOLD = 13, COOLDOWN_MS = 800;
+  const pips = {1:[4],2:[0,8],3:[0,4,8],4:[0,2,6,8],5:[0,2,4,6,8],6:[0,2,3,5,6,8]};
+  const roll = () => (value = 1 + Math.floor(Math.random()*6));
 
-		const acc = event.accelerationIncludingGravity;
-		const totalAcc = Math.sqrt(
-			(acc.x ?? 0) ** 2 +
-			(acc.y ?? 0) ** 2 +
-			(acc.z ?? 0) ** 2
-		);
+  const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
+  function dieTransform() {
+    const tx = trackY ? clamp(gx * 2, -14, 14) : 0;
+    const ty = trackX ? clamp(-gy * 2, -14, 14) : 0;
+    const rz = clamp(gamma * 0.6, -20, 20);
+    return `translate3d(${tx}px, ${ty}px, 0) rotate(${rz}deg)`;
+  }
 
-		const now = Date.now();
-		if (totalAcc > SHAKE_THRESHOLD && now - lastShake > SHAKE_COOLDOWN) {
-			lastShake = now;
-			roll();
-			errorMessage = ''; // Clear any previous error
-		}
-	}
+  let sAx=0,sAy=0,sAz=0,sGx=0,sGy=0,sGz=0,sGamma=0;
+  const SMOOTH=0.25;
+  const smooth = (prev,next)=> prev+(next-prev)*SMOOTH;
 
-	function requestPermission() {
-		if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
-			DeviceMotionEvent.requestPermission()
-				.then(permissionState => {
-					if (permissionState === 'granted') {
-						errorMessage = '';
-						window.addEventListener('devicemotion', handleMotion);
-					} else {
-						errorMessage = 'Motion permission denied';
-					}
-				})
-				.catch(err => {
-					errorMessage = `Permission request failed: ${err.message}`;
-				});
-		} else {
-			// For browsers that don't require explicit permission
-			window.addEventListener('devicemotion', handleMotion);
-		}
-	}
+  function handleMotion(e) {
+    const a = e.acceleration || {}, ag = e.accelerationIncludingGravity || {};
+    ax = sAx = smooth(sAx,a.x??0);
+    ay = sAy = smooth(sAy,a.y??0);
+    az = sAz = smooth(sAz,a.z??0);
+    gx = sGx = smooth(sGx,ag.x??0);
+    gy = sGy = smooth(sGy,ag.y??0);
+    gz = sGz = smooth(sGz,ag.z??0);
 
-	onMount(() => {
-		if (browser) {
-			// Check if DeviceMotionEvent is supported
-			if (typeof DeviceMotionEvent === 'undefined') {
-				errorMessage = 'Device motion not supported by this browser or device';
-				return;
-			}
-			requestPermission();
-		}
-		return () => {
-			if (browser) {
-				window.removeEventListener('devicemotion', handleMotion);
-			}
-		};
-	});
+    const now = Date.now();
+    const shakeX = trackX && Math.abs(ax) > THRESHOLD;
+    const shakeY = trackY && Math.abs(ay) > THRESHOLD;
+    if ((shakeX || shakeY) && now - lastRoll > COOLDOWN_MS) {
+      lastRoll = now; roll();
+      spinning = true; clearTimeout(spinT); spinT=setTimeout(()=>spinning=false,500);
+    }
+  }
+  function handleOrientation(e){ alpha=e.alpha??0; beta=e.beta??0; gamma=sGamma=smooth(sGamma,e.gamma??0); }
+
+  let spinning=false, spinT;
+  async function start() {
+    if(!browser) return;
+    if(typeof DeviceMotionEvent!=='undefined' && DeviceMotionEvent.requestPermission){
+      const p=await DeviceMotionEvent.requestPermission(); if(p!=='granted') return;
+    }
+    window.addEventListener('devicemotion',handleMotion,{passive:true});
+    window.addEventListener('deviceorientation',handleOrientation,{passive:true});
+    listening=true;
+  }
+  function stop(){ if(!browser) return; window.removeEventListener('devicemotion',handleMotion); window.removeEventListener('deviceorientation',handleOrientation); listening=false; }
+
+  onMount(start); onDestroy(stop);
 </script>
 
-<style>
-	.container {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		justify-content: center;
-		height: 100vh;
-		background: linear-gradient(135deg, #6e8efb, #88d3ce);
-		font-family: 'Arial', sans-serif;
-		user-select: none;
-	}
+<div class="min-h-screen bg-gradient-to-br from-pink-200 via-purple-200 to-cyan-200 flex items-center justify-center p-6 font-sans text-[16px] text-purple-800">
+  <div class="space-y-8 w-full max-w-sm">
 
-	h1 {
-		color: white;
-		font-size: 2.5rem;
-		margin-bottom: 1rem;
-		text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
-	}
+    <!-- Buttons -->
+    <div class="flex items-center gap-6 justify-center">
+      {#if !listening}
+        <button 
+          onclick={start} 
+          class="px-4 py-2 rounded-full bg-gradient-to-r from-yellow-400 to-pink-400 hover:scale-105 transform transition 
+                 shadow-lg shadow-pink-400/40 font-bold text-purple-900">
+          Activate
+        </button>
+      {:else}
+        <button 
+          onclick={roll} 
+          class="px-4 py-2 rounded-full bg-gradient-to-r from-cyan-400 to-blue-400 hover:scale-105 transform transition 
+                 shadow-lg shadow-cyan-400/40 font-bold text-purple-900">
+        Roll it
+        </button>
+      {/if}
+    </div>
 
-	.number {
-		font-size: 5rem;
-		font-weight: bold;
-		color: white;
-		background: rgba(0, 0, 0, 0.2);
-		border-radius: 1rem;
-		padding: 1rem 2rem;
-		box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
-		transition: transform 0.2s ease;
-	}
+    <!-- Dice -->
+    <div
+      class={`h-44 w-44 mx-auto bg-gradient-to-br from-yellow-100 to-pink-100 border-4 border-purple-300 rounded-3xl grid grid-cols-3 gap-3 p-4 
+              shadow-[0_6px_20px_rgba(0,0,0,0.15)] 
+              transition-transform duration-200 ease-out
+              ${spinning ? 'animate-bounce' : ''}`}
+      style={`transform:${dieTransform()}`}
+    >
+      {#each Array(9) as _, i}
+        <div class="flex items-center justify-center">
+          {#if pips[value].includes(i)}
+            <div class="w-6 h-6 rounded-full bg-gradient-to-br from-pink-400 to-cyan-400 shadow-[0_0_10px_2px_rgba(255,105,180,0.6)]"></div>
+          {/if}
+        </div>
+      {/each}
+    </div>
 
-	.number.shake {
-		animation: shake 0.3s ease;
-	}
-
-	@keyframes shake {
-		0% { transform: translateX(0); }
-		25% { transform: translateX(-10px); }
-		50% { transform: translateX(10px); }
-		75% { transform: translateX(-10px); }
-		100% { transform: translateX(0); }
-	}
-
-	.instructions {
-		color: white;
-		font-size: 1.2rem;
-		margin-top: 1rem;
-		opacity: 0.9;
-	}
-
-	.error {
-		color: #ff4d4d;
-		font-size: 1rem;
-		margin-top: 1rem;
-		text-align: center;
-		max-width: 80%;
-	}
-
-	.fallback-button {
-		margin-top: 1rem;
-		padding: 0.8rem 1.5rem;
-		font-size: 1.2rem;
-		color: white;
-		background: #4a4a4a;
-		border: none;
-		border-radius: 0.5rem;
-		cursor: pointer;
-		transition: background 0.2s ease;
-	}
-
-	.fallback-button:hover {
-		background: #5a5a5a;
-	}
-</style>
-
-<div class="container">
-	<h1>Shake Dice</h1>
-	<div class="number" class:shake={number !== '-' && lastShake > 0}>{number}</div>
-	<p class="instructions">Shake your phone to roll!</p>
-	{#if errorMessage}
-		<p class="error">{errorMessage}</p>
-	{/if}
-	<button class="fallback-button" on:click={roll}>Roll Manually</button>
+    <!-- Result -->
+    <div class="text-center text-xl font-bold text-purple-700 tracking-wide">
+      RESULT: <span class="text-pink-500">{value}</span> 
+    </div>
+  </div>
 </div>
+
+
+<style>
+  @keyframes dice-spin {
+    0%   { transform: scale(1) rotate(0deg); }
+    25%  { transform: scale(1.1) rotate(90deg); }
+    50%  { transform: scale(1.05) rotate(180deg); }
+    75%  { transform: scale(1.08) rotate(270deg); }
+    100% { transform: scale(1) rotate(360deg); }
+  }
+  .animate-dice-spin {
+    animation: dice-spin 0.5s cubic-bezier(.4,.6,.6,1.2);
+  }
+</style>
