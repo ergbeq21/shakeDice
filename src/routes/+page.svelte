@@ -4,15 +4,19 @@
 
 	let number = '-';
 	let lastShake = 0;
-	const SHAKE_THRESHOLD = 15; 
-	const SHAKE_COOLDOWN = 1000; 
+	let errorMessage = '';
+	const SHAKE_THRESHOLD = 15; // Acceleration threshold for shake detection
+	const SHAKE_COOLDOWN = 1000; // Minimum time between shakes in ms
 
 	function roll() {
 		number = Math.floor(Math.random() * 6) + 1;
 	}
 
 	function handleMotion(event) {
-		if (!event.accelerationIncludingGravity) return;
+		if (!event.accelerationIncludingGravity) {
+			errorMessage = 'No acceleration data available';
+			return;
+		}
 
 		const acc = event.accelerationIncludingGravity;
 		const totalAcc = Math.sqrt(
@@ -25,12 +29,38 @@
 		if (totalAcc > SHAKE_THRESHOLD && now - lastShake > SHAKE_COOLDOWN) {
 			lastShake = now;
 			roll();
+			errorMessage = ''; // Clear any previous error
+		}
+	}
+
+	function requestPermission() {
+		if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+			DeviceMotionEvent.requestPermission()
+				.then(permissionState => {
+					if (permissionState === 'granted') {
+						errorMessage = '';
+						window.addEventListener('devicemotion', handleMotion);
+					} else {
+						errorMessage = 'Motion permission denied';
+					}
+				})
+				.catch(err => {
+					errorMessage = `Permission request failed: ${err.message}`;
+				});
+		} else {
+			// For browsers that don't require explicit permission
+			window.addEventListener('devicemotion', handleMotion);
 		}
 	}
 
 	onMount(() => {
 		if (browser) {
-			window.addEventListener('devicemotion', handleMotion);
+			// Check if DeviceMotionEvent is supported
+			if (typeof DeviceMotionEvent === 'undefined') {
+				errorMessage = 'Device motion not supported by this browser or device';
+				return;
+			}
+			requestPermission();
 		}
 		return () => {
 			if (browser) {
@@ -88,10 +118,38 @@
 		margin-top: 1rem;
 		opacity: 0.9;
 	}
+
+	.error {
+		color: #ff4d4d;
+		font-size: 1rem;
+		margin-top: 1rem;
+		text-align: center;
+		max-width: 80%;
+	}
+
+	.fallback-button {
+		margin-top: 1rem;
+		padding: 0.8rem 1.5rem;
+		font-size: 1.2rem;
+		color: white;
+		background: #4a4a4a;
+		border: none;
+		border-radius: 0.5rem;
+		cursor: pointer;
+		transition: background 0.2s ease;
+	}
+
+	.fallback-button:hover {
+		background: #5a5a5a;
+	}
 </style>
 
 <div class="container">
 	<h1>Shake Dice</h1>
 	<div class="number" class:shake={number !== '-' && lastShake > 0}>{number}</div>
 	<p class="instructions">Shake your phone to roll!</p>
+	{#if errorMessage}
+		<p class="error">{errorMessage}</p>
+	{/if}
+	<button class="fallback-button" on:click={roll}>Roll Manually</button>
 </div>
